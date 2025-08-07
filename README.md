@@ -50,4 +50,3 @@ go run ../server.go
 ```
 
 şimdi browser'a `kenuts://127.0.0.1:6969` adresini yaz, serverdan içerik gelecek.
-```
