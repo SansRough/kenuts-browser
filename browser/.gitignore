@@ -1,0 +1,20 @@
+# node modules
+node_modules/
+
+# output/build klasörleri (eğer varsa)
+dist/
+build/
+
+# electron cache, log, temp dosyaları
+*.log
+*.tmp
+.cache/
+.DS_Store
+
+# OS'ye özel saçmalıklar
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# vscode ayarları (isteğe bağlı)
+.vscode/

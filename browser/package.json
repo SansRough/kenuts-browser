@@ -1,0 +1,24 @@
+{
+  "name": "zg-browser",
+  "version": "1.0.0",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.sigmullah.zgbrowser",
+    "productName": "ZG Browser",
+    "files": [
+      "**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    }
+  },
+  "devDependencies": {
+    "electron": "^xx.xx.xx",
+    "electron-builder": "^xx.xx.xx"
+  }
+}

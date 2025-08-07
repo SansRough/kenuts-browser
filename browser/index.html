@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>ZG Tarayıcı</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: #1a1d20;
+      color: #333;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    #topbar {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px;
+      background: #ffffff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      gap: 12px;
+    }
+
+    #tabs {
+      display: flex;
+      gap: 8px;
+      flex: 1;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #aaa transparent;
+    }
+
+    #tabs::-webkit-scrollbar {
+      height: 6px;
+    }
+    #tabs::-webkit-scrollbar-thumb {
+      background-color: #ccc;
+      border-radius: 3px;
+    }
+
+    .tab {
+      background: #e3e8ee;
+      color: #444;
+      padding: 8px 14px;
+      border-radius: 12px;
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      transition: background-color 0.25s ease, color 0.25s ease;
+      box-shadow: inset 2px 2px 5px #bec8d2, inset -2px -2px 5px #ffffff;
+    }
+
+    .tab:hover {
+      background: #d0d8e6;
+      color: #222;
+    }
+
+    .tab.active {
+      background: #3b82f6;
+      color: white;
+      box-shadow: 0 4px 10px rgba(59, 130, 246, 0.5);
+      font-weight: 600;
+    }
+
+    #toolbar {
+      display: flex;
+      gap: 8px;
+    }
+
+    #addressBar {
+      width: 320px;
+      padding: 8px 12px;
+      border: 1.5px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: border-color 0.3s ease;
+      display: none;
+    }
+
+    #addressBar:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 6px rgba(59, 130, 246, 0.6);
+    }
+
+    #searchOverlay {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0);
+      width: 400px;
+      background: #222;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.7);
+      color: #eee;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.3s ease;
+      z-index: 1000;
+    }
+
+    #searchOverlay.active {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #overlayBackground {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      z-index: 999;
+    }
+
+    #overlayBackground.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    #searchInput {
+      width: 100%;
+      padding: 12px 16px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      background: #333;
+      color: #eee;
+      outline: none;
+    }
+
+    #iframe-container {
+      flex: 1;
+      background: white;
+      box-shadow: inset 0 0 8px #d1d5db;
+      border-radius: 0 0 12px 12px;
+      overflow: hidden;
+    }
+
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <div id="tabs">
+      <!-- Sekmeler buraya gelecek -->
+    </div>
+
+    <div id="toolbar">
+      <input type="text" id="addressBar" placeholder="kenuts://127.0.0.1:6969" />
+    </div>
+  </div>
+
+  <div id="iframe-container">
+    <iframe id="contentFrame"></iframe>
+  </div>
+
+  <!-- ARAMA OVERLAY -->
+  <div id="overlayBackground"></div>
+  <div id="searchOverlay">
+    <input id="searchInput" placeholder="Ara, malgöt... (Ctrl+K ile aç/kapa)" />
+  </div>
+
+  <script>
+    const { ipcRenderer } = window.electron;
+
+    let tabs = [];
+    let currentTab = -1;
+
+    function newTab(address = 'kenuts://127.0.0.1:6969') {
+    const index = tabs.length;
+    tabs.push({
+      address: address,
+      content: '',
+      backStack: [],
+      forwardStack: [],
+      currentAddress: '',
+    });
+    switchTab(index); // zaten currentTab = index yapıyor
+    refreshTabsUI();
+  }
+
+    function refreshTabsUI() {
+      const tabsContainer = document.getElementById('tabs');
+      tabsContainer.innerHTML = '';
+      tabs.forEach((tab, i) => {
+        const tabElem = document.createElement('div');
+        tabElem.classList.add('tab');
+        if (i === currentTab) tabElem.classList.add('active');
+        tabElem.textContent = `Sekme ${i + 1}`;
+        tabElem.onclick = () => switchTab(i);
+        tabsContainer.appendChild(tabElem);
+      });
+    }
+
+    function switchTab(index) {
+      if (!tabs[index]) return;
+      currentTab = index;  // bunu atlama amk
+      loadPage(index, false);
+      refreshTabsUI();
+    }
+
+    async function loadPage(index, pushToHistory = true) {
+      const address = tabs[index].address;
+      document.getElementById('addressBar').value = address;
+
+      try {
+        const html = await ipcRenderer.invoke('fetch-kenuts', address);
+        tabs[index].content = html;
+        document.getElementById('contentFrame').srcdoc = html;
+
+        if (pushToHistory) {
+          const tab = tabs[index];
+          if (tab.currentAddress && tab.currentAddress !== address) {
+            tab.backStack.push(tab.currentAddress);
+            tab.forwardStack = [];
+          }
+          tab.currentAddress = address;
+        }
+      } catch (err) {
+        document.getElementById('contentFrame').srcdoc = `<h1>HATA</h1><pre>${err}</pre>`;
+      }
+    }
+
+    function closeTabManual(index) {
+      tabs.splice(index, 1);
+
+      if (tabs.length === 0) {
+        newTab();
+        return;
+      }
+
+      if (currentTab >= tabs.length) {
+        currentTab = tabs.length - 1;
+      }
+
+      refreshTabsUI();
+      switchTab(currentTab);
+    }
+
+    document.getElementById('addressBar').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const val = e.target.value;
+        tabs[currentTab].address = val;
+        loadPage(currentTab);
+      }
+    });
+
+    // ARAMA OVERLAY KODU
+    const searchOverlay = document.getElementById('searchOverlay');
+    const overlayBg = document.getElementById('overlayBackground');
+    const searchInput = document.getElementById('searchInput');
+
+    function toggleSearch() {
+      const active = searchOverlay.classList.toggle('active');
+      overlayBg.classList.toggle('active', active);
+      if (active) {
+        searchInput.focus();
+      } else {
+        searchInput.value = '';
+      }
+    }
+
+    overlayBg.addEventListener('click', toggleSearch);
+
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const val = searchInput.value.trim();
+        if (val) {
+          tabs[currentTab].address = val;
+          loadPage(currentTab);
+          toggleSearch();
+        }
+      }
+    });
+
+    // KLAVYE KISAYOLLARI
+    document.addEventListener('keydown', (e) => {
+    if (currentTab === -1) return; // sekme yoksa iptal et direkt
+
+    // Ctrl + K
+    if (e.ctrlKey && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      toggleSearch();
+    }
+
+    // Ctrl + T
+    if (e.ctrlKey && e.key.toLowerCase() === 't') {
+      e.preventDefault();
+      newTab();
+    }
+
+    // Ctrl + W
+    if (e.ctrlKey && e.key.toLowerCase() === 'w') {
+      e.preventDefault();
+      if (tabs.length > 0) {
+        closeTabManual(currentTab);
+      }
+    }
+
+    // F5
+    if (e.key === 'F5') {
+      e.preventDefault();
+      reload();
+    }
+  });
+
+    // Mouse 4,5 ileri geri
+    window.addEventListener('mouseup', (e) => {
+    if (currentTab === -1) return;
+    if (e.button === 3) { // mouse back
+      e.preventDefault();
+      goBack();
+    } else if (e.button === 4) { // mouse forward
+      e.preventDefault();
+      goForward();
+    }
+    });
+
+    function goBack() {
+      const tab = tabs[currentTab];
+      if (tab.backStack.length > 0) {
+        const prev = tab.backStack.pop();
+        tab.forwardStack.push(tab.currentAddress);
+        tab.address = prev;
+        loadPage(currentTab, false);
+        tab.currentAddress = prev;
+      }
+    }
+
+    function goForward() {
+      const tab = tabs[currentTab];
+      if (tab.forwardStack.length > 0) {
+        const next = tab.forwardStack.pop();
+        tab.backStack.push(tab.currentAddress);
+        tab.address = next;
+        loadPage(currentTab, false);
+        tab.currentAddress = next;
+      }
+    }
+
+    function reload() {
+      loadPage(currentTab, false);
+    }
+
+    // Başlangıçta bir sekme aç
+    newTab();
+    switchTab(0);
+    document.getElementById('addressBar').focus();
+  </script>
+</body>
+</html>
