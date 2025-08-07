@@ -24,7 +24,30 @@ Kenuts, kendi protokolümüz KENUTS’u destekleyen bi browser. Modern tarayıc�
 
 ## 🛠️ Nasıl Kurulur?
 
-1. Repo’yu klonla:  
-   ```bash
-   git clone https://github.com/SansRough/kenuts-browser.git
-   cd kenuts-browser/browser
+repoyu klonla, içeri gir:
+
+```bash
+git clone https://github.com/SansRough/kenuts-browser.git
+cd kenuts-browser/browser
+```
+
+electron bağımlılıklarını kur:
+
+```bash
+npm install
+```
+
+electron tarayıcıyı çalıştır:
+
+```bash
+npm start
+```
+
+başka bir terminal aç, ana dizindeki server'ı çalıştır:
+
+```bash
+go run ../server.go
+```
+
+şimdi browser'a `kenuts://127.0.0.1:6969` adresini yaz, serverdan içerik gelecek.
+```
