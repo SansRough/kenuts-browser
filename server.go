@@ -14,7 +14,10 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"github.com/fsnotify/fsnotify"
 )
+
+var watcher *fsnotify.Watcher
 
 // Simple logger interface for dependency inversion
 type Logger interface {
@@ -263,6 +266,30 @@ func writeSimpleResponse(conn net.Conn, timeout time.Duration, statusLine, body 
 	conn.Write([]byte(resp))
 }
 
+func (s *Server) watchIndex() error {
+    var err error
+    watcher, err = fsnotify.NewWatcher()
+    if err != nil {
+        return err
+    }
+    go func() {
+        for {
+            select {
+            case event := <-watcher.Events:
+                if event.Op&fsnotify.Write == fsnotify.Write {
+                    s.logger.Infof("index.html değişti, reload ediliyor")
+                    if err := s.loadIndex(); err != nil {
+                        s.logger.Errorf("index reload hatası: %v", err)
+                    }
+                }
+            case err := <-watcher.Errors:
+                s.logger.Errorf("watcher error: %v", err)
+            }
+        }
+    }()
+    return watcher.Add(s.cfg.IndexFile)
+}
+
 func main() {
 	cfg := Config{
 		Addr:            ":6969",
@@ -280,6 +307,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// watchIndex çağrısı main'de olmalı
+	if err := srv.watchIndex(); err != nil {
+		logger.Errorf("watchIndex error: %v", err)
+		os.Exit(1)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -288,13 +321,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	// wait for shutdown signal
 	<-ctx.Done()
 	logger.Infof("shutdown requested")
 
-	// attempt graceful shutdown
 	srv.Stop()
-	// allow short grace period
 	time.Sleep(cfg.ShutdownTimeout)
 	logger.Infof("server stopped")
 }
+
