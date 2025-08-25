@@ -49,6 +49,7 @@ type Config struct {
 	MaxHeaderLines  int
 	IndexFile       string
 	ShutdownTimeout time.Duration
+	StaticDir       string // Directory to serve static files from
 }
 
 // Server represents the KENUTS server (SOLID - S, O)
@@ -160,7 +161,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 		return
 	}
 	// Simple parsing: method and path
-    parts := strings.SplitN(requestLine, " ", 3)
+    parts := strings.Fields(requestLine)
     if len(parts) < 1 {
         s.logger.Errorf("malformed request line: %q", requestLine)
         return
@@ -172,7 +173,12 @@ func (s *Server) handleConnection(conn net.Conn) {
     if strings.ToUpper(parts[0]) == "KENUTS" && len(parts) >= 2 {
         method = strings.ToUpper(parts[1])
         if len(parts) >= 3 {
+            // For KENUTS GET /path ZG/1.0 format
             path = parts[2]
+            // Remove protocol version if it's at the end
+            if len(parts) >= 4 && parts[3] == "ZG/1.0" {
+                // Path is correctly in parts[2]
+            }
         } else {
             path = "/"
         }
@@ -184,6 +190,13 @@ func (s *Server) handleConnection(conn net.Conn) {
             path = "/"
         }
     }
+
+    // Clean path - remove protocol info if present (only if it's exactly the protocol version)
+    if path == "ZG/1.0" || path == "ZG/" {
+        path = "/"
+    }
+
+    s.logger.Infof("parsed request - method: %s, path: %s", method, path)
 
     // Read headers up to configured limit
     headers, err := readHeaders(reader, s.cfg.MaxHeaderLines)
@@ -199,31 +212,9 @@ func (s *Server) handleConnection(conn net.Conn) {
         return
     }
 
-	// serve index for root or any path (original behavior)
-	s.mu.RLock()
-	body := make([]byte, len(s.index))
-	copy(body, s.index)
-	s.mu.RUnlock()
-
-	headersOut := []string{
-		"ZG/1.0 200 OK",
-		"ZG-Power: MAXIMUM",
-		fmt.Sprintf("Content-Length: %d", len(body)),
-		"Content-Type: text/html; charset=utf-8",
-	}
-	resp := strings.Join(headersOut, "\r\n") + "\r\n\r\n"
-
-	conn.SetWriteDeadline(time.Now().Add(s.cfg.WriteTimeout))
-	if _, err := io.WriteString(conn, resp); err != nil {
-		s.logger.Errorf("write headers: %v", err)
-		return
-	}
-	if _, err := conn.Write(body); err != nil {
-		s.logger.Errorf("write body: %v", err)
-		return
-	}
-	// success
-	s.logger.Infof("responded 200 OK to %s %s", remote, path)
+	// Serve the requested file
+	s.serveFile(conn, path)
+	s.logger.Infof("responded to %s %s", remote, path)
 }
 
 // Helper: readLine returns a single line without trailing CR/LF
@@ -266,6 +257,119 @@ func writeSimpleResponse(conn net.Conn, timeout time.Duration, statusLine, body 
 	conn.Write([]byte(resp))
 }
 
+// getMimeType returns the MIME type for a given file extension
+func getMimeType(ext string) string {
+	ext = strings.ToLower(ext)
+	switch ext {
+	case ".html", ".htm":
+		return "text/html; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".js":
+		return "application/javascript; charset=utf-8"
+	case ".json":
+		return "application/json; charset=utf-8"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".svg":
+		return "image/svg+xml"
+	case ".ico":
+		return "image/x-icon"
+	case ".txt":
+		return "text/plain; charset=utf-8"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+// serveFile serves a file from the static directory
+func (s *Server) serveFile(conn net.Conn, requestPath string) {
+	// Security: prevent directory traversal
+	if strings.Contains(requestPath, "..") {
+		writeSimpleResponse(conn, s.cfg.WriteTimeout, "ZG/1.0 403 Forbidden", "Forbidden")
+		return
+	}
+
+	// Clean the path and determine file location
+	if requestPath == "/" {
+		requestPath = "/index.html"
+	}
+
+	s.logger.Infof("DEBUG: Processing request path: %s", requestPath)
+
+	var filePath string
+	if requestPath == "/index.html" {
+		s.logger.Infof("DEBUG: Serving cached index.html")
+		// Serve the main index file
+		s.mu.RLock()
+		body := make([]byte, len(s.index))
+		copy(body, s.index)
+		s.mu.RUnlock()
+
+		headersOut := []string{
+			"ZG/1.0 200 OK",
+			"ZG-Power: MAXIMUM",
+			fmt.Sprintf("Content-Length: %d", len(body)),
+			"Content-Type: text/html; charset=utf-8",
+		}
+		resp := strings.Join(headersOut, "\r\n") + "\r\n\r\n"
+
+		conn.SetWriteDeadline(time.Now().Add(s.cfg.WriteTimeout))
+		if _, err := io.WriteString(conn, resp); err != nil {
+			s.logger.Errorf("write headers: %v", err)
+			return
+		}
+		if _, err := conn.Write(body); err != nil {
+			s.logger.Errorf("write body: %v", err)
+			return
+		}
+		s.logger.Infof("served index.html")
+		return
+	}
+
+	// Serve static files from the static directory
+	filePath = filepath.Join(s.cfg.StaticDir, strings.TrimPrefix(requestPath, "/"))
+	s.logger.Infof("DEBUG: Calculated file path: %s", filePath)
+	s.logger.Infof("DEBUG: Static dir: %s", s.cfg.StaticDir)
+
+	// Check if file exists
+	fileData, err := s.fs.ReadFile(filePath)
+	if err != nil {
+		s.logger.Errorf("file not found: %s", filePath)
+		writeSimpleResponse(conn, s.cfg.WriteTimeout, "ZG/1.0 404 Not Found", "File Not Found")
+		return
+	}
+
+	// Determine MIME type
+	ext := filepath.Ext(filePath)
+	mimeType := getMimeType(ext)
+
+	// Send response
+	headersOut := []string{
+		"ZG/1.0 200 OK",
+		"ZG-Power: MAXIMUM",
+		fmt.Sprintf("Content-Length: %d", len(fileData)),
+		fmt.Sprintf("Content-Type: %s", mimeType),
+	}
+	resp := strings.Join(headersOut, "\r\n") + "\r\n\r\n"
+
+	conn.SetWriteDeadline(time.Now().Add(s.cfg.WriteTimeout))
+	if _, err := io.WriteString(conn, resp); err != nil {
+		s.logger.Errorf("write headers: %v", err)
+		return
+	}
+	if _, err := conn.Write(fileData); err != nil {
+		s.logger.Errorf("write body: %v", err)
+		return
+	}
+
+	s.logger.Infof("served file: %s (%s)", filePath, mimeType)
+}
+
 func (s *Server) watchIndex() error {
     var err error
     watcher, err = fsnotify.NewWatcher()
@@ -291,14 +395,15 @@ func (s *Server) watchIndex() error {
 }
 
 func main() {
-	cfg := Config{
-		Addr:            ":6969",
-		ReadTimeout:     5 * time.Second,
-		WriteTimeout:    5 * time.Second,
-		MaxHeaderLines:  200,
-		IndexFile:       filepath.Join(".", "index.html"),
-		ShutdownTimeout: 5 * time.Second,
-	}
+    cfg := Config{
+        Addr:            ":6969",
+        ReadTimeout:     5 * time.Second,
+        WriteTimeout:    5 * time.Second,
+        MaxHeaderLines:  200,
+        IndexFile:       filepath.Join(".", "index.html"),
+        StaticDir:       ".", // Serve files from current directory
+        ShutdownTimeout: 5 * time.Second,
+    }
 
 	logger := &StdLogger{}
 	srv := NewServer(cfg, nil, logger)

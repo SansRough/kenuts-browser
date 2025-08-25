@@ -14,7 +14,7 @@ function createWindow() {
   win.maximize()
   win.loadFile('index.html');
 }
-Menu.setApplicationMenu(null);
+//Menu.setApplicationMenu(null);
 app.whenReady().then(createWindow);
 
 ipcMain.handle('fetch-kenuts', async (event, address) => {
@@ -24,13 +24,30 @@ ipcMain.handle('fetch-kenuts', async (event, address) => {
       return;
     }
 
-    const addr = address.replace('kenuts://', '');
-    const [host, port] = addr.split(':');
+    // Parse full URL to extract host, port, and path
+    const url = new URL(address);
+    const host = url.hostname;
+    const port = url.port ? parseInt(url.port, 10) : 6969;
+    const path = url.pathname || '/';
+    
+    // Validate port
+    if (isNaN(port) || port <= 0 || port >= 65536) {
+      reject(`Geçersiz port numarası: ${url.port}`);
+      return;
+    }
+    
+    if (!host || host.trim() === '') {
+      reject('Geçersiz host adresi');
+      return;
+    }
+    
     const client = new net.Socket();
     let dataBuffer = '';
 
-    client.connect(parseInt(port), host, () => {
-      const request = "KENUTS GET ZG/1.0\r\nZG-Mode: HTML\r\n\r\n";
+    client.connect(port, host.trim(), () => {
+      // Include the path in the request
+      const request = `KENUTS GET ${path} ZG/1.0\r\nZG-Mode: HTML\r\n\r\n`;
+      console.log('Sending request:', request.replace(/\r\n/g, '\\r\\n'));
       client.write(request);
     });
 

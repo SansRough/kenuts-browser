@@ -1,0 +1,135 @@
+/* Kenuts Website Styles */
+
+body {
+    font-family: 'Courier New', monospace;
+    line-height: 1.6;
+    margin: 0;
+    padding: 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #333;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    background: rgba(255, 255, 255, 0.95);
+    padding: 30px;
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+}
+
+header {
+    text-align: center;
+    margin-bottom: 30px;
+    border-bottom: 3px solid #667eea;
+    padding-bottom: 20px;
+}
+
+h1 {
+    color: #667eea;
+    font-size: 2.5em;
+    margin: 0;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+aside {
+    font-style: italic;
+    color: #666;
+    margin-top: 10px;
+}
+
+h2 {
+    color: #764ba2;
+    border-left: 4px solid #667eea;
+    padding-left: 15px;
+    margin: 25px 0 15px 0;
+}
+
+h3 {
+    color: #667eea;
+    margin: 20px 0 10px 0;
+}
+
+p {
+    margin: 15px 0;
+    text-align: justify;
+}
+
+ul {
+    padding-left: 30px;
+}
+
+li {
+    margin: 8px 0;
+    transition: color 0.3s ease;
+}
+
+li:hover {
+    color: #667eea;
+    cursor: default;
+}
+
+blockquote {
+    background: #f8f9fa;
+    border-left: 5px solid #667eea;
+    margin: 20px 0;
+    padding: 15px 20px;
+    font-style: italic;
+    border-radius: 0 10px 10px 0;
+}
+
+strong {
+    color: #764ba2;
+    font-weight: bold;
+}
+
+.highlight {
+    background: linear-gradient(120deg, #a8edea 0%, #fed6e3 100%);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+.kenuts-info {
+    background: rgba(102, 126, 234, 0.1);
+    border: 2px solid #667eea;
+    border-radius: 10px;
+    padding: 20px;
+    margin: 20px 0;
+    text-align: center;
+}
+
+.kenuts-info h3 {
+    color: #667eea;
+    margin-top: 0;
+}
+
+/* Responsive design */
+@media (max-width: 600px) {
+    body {
+        padding: 10px;
+    }
+    
+    .container {
+        padding: 20px;
+    }
+    
+    h1 {
+        font-size: 2em;
+    }
+}
+
+/* Fun animations */
+.container:hover {
+    transform: translateY(-2px);
+    transition: transform 0.3s ease;
+}

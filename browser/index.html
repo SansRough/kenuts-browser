@@ -215,14 +215,146 @@
       refreshTabsUI();
     }
 
+    async function processHtmlWithResources(html, baseAddress) {
+      // Extract the base URL for fetching resources
+      const urlMatch = baseAddress.match(/^kenuts:\/\/([^:\/]+)(?::(\d+))?/);
+      if (!urlMatch) {
+        return html;
+      }
+      
+      const host = urlMatch[1];
+      const port = urlMatch[2] || '6969';
+      const baseUrl = `kenuts://${host}:${port}`;
+      
+      console.log('Processing resources for:', baseUrl);
+      console.log('Original HTML length:', html.length);
+      
+      // Create a temporary DOM to safely process the HTML
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = html;
+      
+      console.log('DOM created, looking for CSS links...');
+      
+      // Process CSS links
+      const cssLinks = tempDiv.querySelectorAll('link[rel="stylesheet"]');
+      console.log('Found CSS links:', cssLinks.length, Array.from(cssLinks).map(l => l.getAttribute('href')));
+      for (const link of cssLinks) {
+        const href = link.getAttribute('href');
+        console.log('Processing CSS link:', href);
+        if (href && href.startsWith('/')) {
+          try {
+            console.log('Fetching CSS:', baseUrl + href);
+            const cssContent = await ipcRenderer.invoke('fetch-kenuts', baseUrl + href);
+            console.log('Fetched CSS content length:', cssContent?.length, 'starts with <:', cssContent?.trim().startsWith('<'));
+            
+            // Validate that we got CSS content, not HTML
+            if (cssContent && !cssContent.trim().startsWith('<')) {
+              // Create style element
+              const style = document.createElement('style');
+              style.textContent = `/* ${href} */\n${cssContent}`;
+              
+              // Replace link with style
+              console.log('Replacing link with style element');
+              link.parentNode.insertBefore(style, link);
+              link.remove();
+              console.log('Successfully injected CSS:', href);
+            } else {
+              console.warn('Received HTML instead of CSS for:', href, 'keeping original link');
+            }
+          } catch (err) {
+            console.error('Failed to fetch CSS:', href, err);
+          }
+        } else {
+          console.log('Skipping non-absolute CSS:', href);
+        }
+      }
+      
+      console.log('Looking for JS scripts...');
+      // Process JS scripts
+      const jsScripts = tempDiv.querySelectorAll('script[src]');
+      console.log('Found JS scripts:', jsScripts.length, Array.from(jsScripts).map(s => s.getAttribute('src')));
+      for (const script of jsScripts) {
+        const src = script.getAttribute('src');
+        console.log('Processing JS script:', src);
+        if (src && src.startsWith('/')) {
+          try {
+            console.log('Fetching JS:', baseUrl + src);
+            const jsContent = await ipcRenderer.invoke('fetch-kenuts', baseUrl + src);
+            console.log('Fetched JS content length:', jsContent?.length, 'starts with <:', jsContent?.trim().startsWith('<'));
+            
+            // Validate that we got JS content, not HTML
+            if (jsContent && !jsContent.trim().startsWith('<')) {
+              // Create script element
+              const newScript = document.createElement('script');
+              newScript.textContent = `/* ${src} */\n${jsContent}`;
+              
+              // Replace external script with inline script
+              console.log('Replacing script with inline script');
+              script.parentNode.insertBefore(newScript, script);
+              script.remove();
+              console.log('Successfully injected JS:', src);
+            } else {
+              console.warn('Received HTML instead of JS for:', src, 'keeping original script');
+            }
+          } catch (err) {
+            console.error('Failed to fetch JS:', src, err);
+          }
+        } else {
+          console.log('Skipping non-absolute JS:', src);
+        }
+      }
+      
+      // Return the processed HTML with fallback styling if no CSS was loaded
+      const finalHtml = tempDiv.innerHTML;
+      console.log('Final processed HTML length:', finalHtml.length);
+      console.log('Final HTML contains <link>:', finalHtml.includes('<link'));
+      console.log('Final HTML contains <script src>:', finalHtml.includes('<script src'));
+      console.log('Final HTML contains <style>:', finalHtml.includes('<style>'));
+      
+      // If no CSS was successfully loaded, add some basic styling
+      if (!finalHtml.includes('<style>')) {
+        const fallbackStyle = document.createElement('style');
+        fallbackStyle.textContent = `
+          /* Fallback CSS when external files cannot be loaded */
+          body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+          h1, h2, h3 { color: #333; }
+          nav a { margin-right: 15px; color: #007acc; text-decoration: none; }
+          nav a:hover { text-decoration: underline; }
+          nav a.active { font-weight: bold; color: #d63384; }
+          .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+          .card { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; }
+          .grid { display: flex; flex-wrap: wrap; gap: 15px; }
+          .grid-2 .card { flex: 1; min-width: 250px; }
+        `;
+        tempDiv.appendChild(fallbackStyle);
+      }
+      
+      return tempDiv.innerHTML;
+    }
+
     async function loadPage(index, pushToHistory = true) {
       const address = tabs[index].address;
+      console.log('=== LOAD PAGE DEBUG ===');
+      console.log('Loading page for tab index:', index);
+      console.log('Address from tabs[' + index + '].address:', address);
+      console.log('pushToHistory:', pushToHistory);
+      console.trace('loadPage call stack:');
+      
       document.getElementById('addressBar').value = address;
 
       try {
+        console.log('=== CALLING FETCH-KENUTS ===');
+        console.log('Fetching URL:', address);
         const html = await ipcRenderer.invoke('fetch-kenuts', address);
+        console.log('=== FETCH SUCCESSFUL ===');
+        console.log('Received HTML length:', html.length);
+        
         tabs[index].content = html;
-        document.getElementById('contentFrame').srcdoc = html;
+        
+        // Process and inject resources directly into HTML
+        const processedHtml = await processHtmlWithResources(html, address);
+        const modifiedHtml = injectNavigationHandler(processedHtml, address);
+        document.getElementById('contentFrame').srcdoc = modifiedHtml;
 
         if (pushToHistory) {
           const tab = tabs[index];
@@ -233,9 +365,201 @@
           tab.currentAddress = address;
         }
       } catch (err) {
+        console.log('=== FETCH ERROR ===');
+        console.log('Error details:', err);
         document.getElementById('contentFrame').srcdoc = `<h1>HATA</h1><pre>${err}</pre>`;
       }
     }
+
+    function injectNavigationHandler(html, baseAddress) {
+      // Extract protocol, host, port from base address
+      const urlMatch = baseAddress.match(/^kenuts:\/\/([^:\/]+)(?::(\d+))?(?:\/(.*))?$/);
+      if (!urlMatch) {
+        console.error('Invalid base address:', baseAddress);
+        return html;
+      }
+      
+      const protocol = 'kenuts://';
+      const host = urlMatch[1];
+      const port = urlMatch[2] || '6969';
+      const path = urlMatch[3] || '';
+      
+      const baseUrl = `${protocol}${host}:${port}`;
+      const currentPath = path ? `/${path}` : '';
+      const currentDir = currentPath.replace(/\/[^\/]*$/, '') || '';
+      
+      // Inject a script that will intercept link clicks
+      const navigationScript = `
+        <script>
+          console.log('=== SCRIPT STARTED EXECUTING ===');
+          console.log('Script execution context:', window.location.href);
+          (function() {
+            console.log('=== NAVIGATION HANDLER LOADED (IMMEDIATE) ===');
+            console.log('Navigation handler loaded for:', '${baseAddress}');
+            console.log('Base URL:', '${baseUrl}');
+            console.log('Current Path:', '${currentPath}');
+            console.log('Current Dir:', '${currentDir}');
+            
+            function setupNavigationHandlers() {
+              console.log('Setting up navigation handlers...');
+              
+              // Add click debugging
+              document.addEventListener('click', function(e) {
+                console.log('=== CLICK DETECTED ===');
+                console.log('Clicked element:', e.target);
+                console.log('Target tagName:', e.target.tagName);
+                console.log('Target href attribute:', e.target.getAttribute('href'));
+              }, true);
+              
+              // Intercept all link clicks
+              document.addEventListener('click', function(e) {
+              const link = e.target.closest('a');
+              if (link && link.href) {
+                e.preventDefault();
+                
+                let targetUrl = link.getAttribute('href');
+                console.log('=== LINK CLICK DEBUG ===');
+                console.log('Original link href:', targetUrl);
+                console.log('Base address:', '${baseAddress}');
+                console.log('Base URL:', '${baseUrl}');
+                console.log('Current path:', '${currentPath}');
+                console.log('Current dir:', '${currentDir}');
+                
+                // Handle different URL types
+                if (targetUrl.startsWith('kenuts://')) {
+                  // Already absolute KENUTS URL
+                  console.log('Absolute KENUTS URL:', targetUrl);
+                } else if (targetUrl.startsWith('http://') || targetUrl.startsWith('https://')) {
+                  // External URLs - not supported, ignore or show error
+                  console.log('External URL not supported:', targetUrl);
+                  return;
+                } else {
+                  // Relative URL - convert to absolute KENUTS URL
+                  if (targetUrl.startsWith('/')) {
+                    // Absolute path from server root
+                    targetUrl = '${baseUrl}' + targetUrl;
+                    console.log('Absolute path resolution:', targetUrl);
+                  } else if (targetUrl.startsWith('./')) {
+                    // Relative to current directory
+                    targetUrl = '${baseUrl}${currentDir}/' + targetUrl.substring(2);
+                    console.log('Current dir relative resolution:', targetUrl);
+                  } else if (targetUrl.startsWith('../')) {
+                    // Parent directory navigation
+                    let dirParts = '${currentDir}'.split('/').filter(p => p);
+                    let relativeParts = targetUrl.split('/');
+                    console.log('Parent dir navigation - dirParts:', dirParts, 'relativeParts:', relativeParts);
+                    
+                    // Process each '../' by removing a directory level
+                    while (relativeParts.length > 0 && relativeParts[0] === '..') {
+                      relativeParts.shift();
+                      dirParts.pop();
+                    }
+                    
+                    const finalPath = dirParts.length > 0 ? '/' + dirParts.join('/') + '/' + relativeParts.join('/') : '/' + relativeParts.join('/');
+                    targetUrl = '${baseUrl}' + finalPath;
+                    console.log('Parent dir resolution:', targetUrl);
+                  } else {
+                    // Relative to current directory (no prefix)
+                    targetUrl = '${baseUrl}${currentDir}/' + targetUrl;
+                    console.log('Simple relative resolution:', targetUrl);
+                  }
+                }
+                
+                console.log('=== FINAL TARGET URL:', targetUrl, '===');
+                
+                // Send message to parent window to navigate
+                window.parent.postMessage({
+                  type: 'navigate',
+                  url: targetUrl
+                }, '*');
+              }
+            });
+            
+            // Handle form submissions if needed
+            document.addEventListener('submit', function(e) {
+              e.preventDefault();
+              const form = e.target;
+              const action = form.getAttribute('action') || '';
+              const method = form.getAttribute('method') || 'GET';
+              
+              if (action) {
+                let targetUrl;
+                if (action.startsWith('kenuts://')) {
+                  targetUrl = action;
+                } else if (action.startsWith('/')) {
+                  targetUrl = '${baseUrl}' + action;
+                } else {
+                  targetUrl = '${baseUrl}${currentDir}/' + action;
+                }
+                
+                console.log('Form submission to:', targetUrl);
+                
+                window.parent.postMessage({
+                  type: 'navigate',
+                  url: targetUrl
+                }, '*');
+              }
+            });
+            }
+            
+            // Execute immediately if DOM is ready, otherwise wait for DOMContentLoaded
+            if (document.readyState === 'loading') {
+              console.log('DOM still loading, waiting for DOMContentLoaded...');
+              document.addEventListener('DOMContentLoaded', setupNavigationHandlers);
+            } else {
+              console.log('DOM already ready, setting up handlers immediately...');
+              setupNavigationHandlers();
+            }
+          })();
+        <\/script>
+      `;
+      
+      // Inject the script at the end of the HTML content
+      console.log('=== SCRIPT INJECTION DEBUG ===');
+      console.log('Original HTML contains </body>:', html.includes('</body>'));
+      console.log('Original HTML contains </html>:', html.includes('</html>'));
+      console.log('Navigation script length:', navigationScript.length);
+      
+      let modifiedHtml;
+      if (html.includes('</body>')) {
+        // Try to inject before </body> first
+        modifiedHtml = html.replace('</body>', navigationScript + '</body>');
+        console.log('Injected before </body> tag');
+      } else if (html.includes('</html>')) {
+        // Fallback: inject before </html>
+        modifiedHtml = html.replace('</html>', navigationScript + '</html>');
+        console.log('Injected before </html> tag');
+      } else {
+        // Last resort: append to end
+        modifiedHtml = html + navigationScript;
+        console.log('Appended to end of HTML');
+      }
+      
+      console.log('Modified HTML contains navigation script:', modifiedHtml.includes('NAVIGATION HANDLER LOADED'));
+      return modifiedHtml;
+    }
+
+    // Listen for navigation messages from the iframe
+    window.addEventListener('message', function(e) {
+      console.log('=== MAIN WINDOW RECEIVED MESSAGE ===');
+      console.log('Message origin:', e.origin);
+      console.log('Message data:', e.data);
+      console.log('Message type:', e.data ? e.data.type : 'no type');
+      console.log('Message URL:', e.data ? e.data.url : 'no URL');
+      console.log('Current tab index:', currentTab);
+      
+      if (e.data && e.data.type === 'navigate' && currentTab !== -1) {
+        console.log('=== PROCESSING NAVIGATION ===');
+        console.log('Navigating to:', e.data.url);
+        console.log('Setting tabs[' + currentTab + '].address to:', e.data.url);
+        tabs[currentTab].address = e.data.url;
+        console.log('Calling loadPage with:', currentTab, true);
+        loadPage(currentTab, true);
+      } else {
+        console.log('=== NAVIGATION IGNORED ===');
+        console.log('Reason: data type =', e.data ? e.data.type : 'no data', ', currentTab =', currentTab);
+      }
+    });
 
     function closeTabManual(index) {
       tabs.splice(index, 1);
