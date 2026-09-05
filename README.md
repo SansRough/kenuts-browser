@@ -1,6 +1,6 @@
 # Kenuts
 
-## 🚀 Ne lan bu Kenuts?
+## 🚀 Ne bu Kenuts?
 
 Kenuts, kendi protokolümüz KENUTS’u destekleyen bi browser. Modern tarayıcılar gibi popüler değil, ama **tam bizim kafamızda**: hafif, hızlı, delirmiş gibi çalışıyor.
 
